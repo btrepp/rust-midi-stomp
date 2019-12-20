@@ -8,30 +8,35 @@ extern crate panic_halt; // you can put a breakpoint on `rust_begin_unwind` to c
 // extern crate panic_semihosting; // logs messages to the host stderr; requires a debugger
 
 use cortex_m::asm::delay;
+use cortex_m_semihosting::{hprintln};
 use embedded_hal::digital::v2::OutputPin;
-use rtfm::app;
 use stm32f1xx_hal::{
-    prelude::*
+    prelude::*,
+    usb::{Peripheral, UsbBus, UsbBusType},
 };
+use rtfm::cyccnt::U32Ext;
 use usb_device::prelude::UsbDevice;
 use usb_device::bus;
+use usb_device::prelude::UsbDeviceState;
 use usb_device::prelude::UsbDeviceBuilder;
 use usb_device::prelude::UsbVidPid;
-use stm32_usbd::{UsbBus,UsbBusType};
-mod midi;
+use usbd_midi::midi_device::MidiClass;
+use usbd_midi::data::usb::constants::USB_CLASS_NONE;
 
-#[app(device = stm32f1::stm32f103)]
+#[rtfm::app(device = stm32f1xx_hal::stm32,peripherals = true,monotonic = rtfm::cyccnt::CYCCNT)]
 const APP: () = {
 
-    static mut USB_DEV : UsbDevice<'static, UsbBusType> = ();
-    static mut MIDI : midi::MidiClass<'static, UsbBusType> = ();
+    struct Resources {
+        midi: MidiClass<'static, UsbBusType>,
+        usb_dev: UsbDevice<'static,UsbBusType>
+    }
 
-    #[init()]
-    fn init() -> init::LateResources {
+    #[init(spawn= [send_midi])]
+    fn init(cx: init::Context) -> init::LateResources {
         static mut USB_BUS: Option<bus::UsbBusAllocator<UsbBusType>> = None;
 
-        let _core : rtfm::Peripherals = core;
-        let device : stm32f1::stm32f103::Peripherals = device;
+        let _core : rtfm::Peripherals = cx.core;
+        let device = cx.device;
 
         let mut flash = device.FLASH.constrain();
         let mut rcc = device.RCC.constrain();
@@ -56,33 +61,61 @@ const APP: () = {
         let usb_dm = gpioa.pa11;
         let usb_dp = usb_dp.into_floating_input(&mut gpioa.crh);
 
+        let usb = Peripheral {
+            usb: device.USB,
+            pin_dm: usb_dm,
+            pin_dp: usb_dp
+        };
 
-        *USB_BUS = Some(UsbBus::new(device.USB, (usb_dm,usb_dp)));
+        *USB_BUS = Some(UsbBus::new(usb));
 
-        let midi = midi::MidiClass::new(USB_BUS.as_ref().unwrap());
+        let midi = MidiClass::new(USB_BUS.as_ref().unwrap());
         
         let usb_dev =
             UsbDeviceBuilder::new(USB_BUS.as_ref().unwrap(), UsbVidPid(0x16c0, 0x27dd))
                 .manufacturer("Unknown")
                 .product("BluepillX Midi")
                 .serial_number("TOTALLY_LEGIT")
-                .device_class(midi::USB_CLASS_NONE)
+                .device_class(USB_CLASS_NONE)
                 .build();
+
+        cx.spawn.send_midi().unwrap();                
+
         init::LateResources {
-            USB_DEV : usb_dev,
-            MIDI : midi
+            usb_dev : usb_dev,
+            midi : midi
         }
     }
 
 
-    #[interrupt(resources = [USB_DEV, MIDI])]
-    fn USB_HP_CAN_TX() {
-        usb_poll(&mut resources.USB_DEV, &mut resources.MIDI);
+    #[task(schedule = [send_midi], priority=1, resources = [usb_dev,midi])]
+    fn send_midi(cx: send_midi::Context){
+
+        
+        static mut ON:bool = false;
+        if cx.resources.usb_dev.state() == UsbDeviceState::Configured {
+
+            if *ON {
+                //resources.MIDI.note_off(0, Note::C3,0xFF).unwrap();
+            } else {
+                //resources.MIDI.note_on(0, Note::C3,0x0FF).unwrap();
+            }
+
+            *ON = !*ON;
+            
+        }
+        cx.schedule.send_midi(cx.scheduled+32_000_000.cycles()).unwrap();
     }
 
-    #[interrupt(resources = [USB_DEV, MIDI])]
-    fn USB_LP_CAN_RX0() {
-        usb_poll(&mut resources.USB_DEV, &mut resources.MIDI);
+    #[task(binds = USB_HP_CAN_TX,resources = [usb_dev, midi])]
+    fn usb_hp_can_tx(mut cx: usb_hp_can_tx::Context) {
+        usb_poll(&mut cx.resources.usb_dev, &mut cx.resources.midi);
+        hprintln!("TX").unwrap();
+    }
+
+    #[task(binds= USB_LP_CAN_RX0, resources = [usb_dev, midi])]
+    fn usb_lp_can_rx0(mut cx:usb_lp_can_rx0::Context) {
+        usb_poll(&mut cx.resources.usb_dev, &mut cx.resources.midi);
     }
 
     extern "C" {
@@ -92,10 +125,11 @@ const APP: () = {
 
 fn usb_poll<B: bus::UsbBus>(
     usb_dev: &mut UsbDevice<'static, B>,
-    midi: &mut midi::MidiClass<'static, B>,
+    midi: &mut MidiClass<'static, B>,
 ) {
     if !usb_dev.poll(&mut [midi]) {
         return;
     }
+   
    
 }
