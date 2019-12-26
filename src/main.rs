@@ -23,11 +23,43 @@ use usb_device::prelude::UsbVidPid;
 use usbd_midi::midi_device::MidiClass;
 use usbd_midi::data::usb::constants::USB_CLASS_NONE;
 
+use usbd_midi:: {
+    data:: {
+        byte::u7::U7,
+        midi::notes::Note,
+        midi::message::Message,
+        midi::channel::Channel,
+        usb_midi::cable_number::CableNumber,
+        usb_midi::usb_midi_event_packet::UsbMidiEventPacket
+    }
+};
+
+const CABLE :CableNumber = CableNumber::Cable0;
+const CHANNEL :Channel= Channel::Channel1;
+const NOTE: Note = Note::C3;
+const VELOCITY: U7 = U7::MAX;
+
+const NOTE_ON : UsbMidiEventPacket = {
+    const MIDI :Message= Message::NoteOn(CHANNEL,NOTE,VELOCITY);
+    UsbMidiEventPacket{
+        cable_number : CABLE,
+        message : MIDI
+    }
+};
+
+const NOTE_OFF : UsbMidiEventPacket = {
+    const MIDI :Message= Message::NoteOff(CHANNEL,NOTE,VELOCITY);
+    UsbMidiEventPacket{
+        cable_number : CABLE,
+        message : MIDI
+    }
+};
+
 #[rtfm::app(device = stm32f1xx_hal::stm32,peripherals = true,monotonic = rtfm::cyccnt::CYCCNT)]
 const APP: () = {
 
     struct Resources {
-        midi: MidiClass<'static, UsbBusType>,
+        midi: MidiClass<'static,UsbBusType>,
         usb_dev: UsbDevice<'static,UsbBusType>
     }
 
@@ -91,14 +123,16 @@ const APP: () = {
     #[task(schedule = [send_midi], priority=1, resources = [usb_dev,midi])]
     fn send_midi(cx: send_midi::Context){
 
-        
         static mut ON:bool = false;
+
         if cx.resources.usb_dev.state() == UsbDeviceState::Configured {
 
             if *ON {
-                //resources.MIDI.note_off(0, Note::C3,0xFF).unwrap();
+                let _ = cx.resources.midi.send_message(NOTE_ON);
+                
             } else {
-                //resources.MIDI.note_on(0, Note::C3,0x0FF).unwrap();
+                let _ = cx.resources.midi.send_message(NOTE_OFF);
+                
             }
 
             *ON = !*ON;

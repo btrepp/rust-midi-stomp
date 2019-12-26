@@ -2,7 +2,7 @@
 authors = ["beau trepp <beautrepp@gmail.com>"]
 edition = "2018"
 readme = "README.md"
-name = "bluepill"
+name = "rust-midi-stomp"
 version = "0.1.0"
 
 [dependencies]
@@ -19,7 +19,7 @@ embedded-hal = "0.2.3"
 
 # this lets you use `cargo fix`!
 [[bin]]
-name = "bluepill"
+name = "rust-midi-stomp"
 test = false
 bench = false
 
