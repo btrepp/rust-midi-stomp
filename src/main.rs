@@ -9,7 +9,6 @@ extern crate panic_semihosting; // you can put a breakpoint on `rust_begin_unwin
 // extern crate panic_semihosting; // logs messages to the host stderr; requires a debugger
 
 use cortex_m::asm::delay;
-use cortex_m_semihosting::{hprintln};
 use embedded_hal::digital::v2::{
     OutputPin,
     InputPin
@@ -81,7 +80,7 @@ const APP: () = {
         pa4 : PA4<Input<PullDown>>
     }
 
-    #[init(spawn= [send_midi])]
+    #[init(spawn= [main_loop])]
     fn init(mut cx: init::Context) -> init::LateResources {
         static mut USB_BUS: Option<bus::UsbBusAllocator<UsbBusType>> = None;
 
@@ -131,9 +130,8 @@ const APP: () = {
                 .device_class(USB_CLASS_NONE)
                 .build();
 
-        cx.spawn.send_midi().unwrap();                
 
-        hprintln!("Setup").unwrap();
+        cx.spawn.main_loop().unwrap();            
         init::LateResources {
             usb_dev : usb_dev,
             midi : midi,
@@ -141,39 +139,52 @@ const APP: () = {
         }
     }
 
-
-    #[task(schedule = [send_midi], priority=1, resources = [usb_dev,midi,pa4])]
-    fn send_midi(cx: send_midi::Context){
-
-        static mut ON:bool = false;
-
-        if cx.resources.usb_dev.state() == UsbDeviceState::Configured {
-
-            if *ON {
-                let _ = cx.resources.midi.send_message(NOTE_ON);
-                
-            } else {
-                let _ = cx.resources.midi.send_message(NOTE_OFF);
-                
-            }
-
-            *ON = !*ON;
-            
-        }
-        cx.schedule.send_midi(cx.scheduled+32_000_000.cycles()).unwrap();
+    /// Main 'loop'
+    /// currently this runs every 1_000_000 cycles,
+    /// reads the input pin, and converts sends messages
+    /// on an 'edge'
+    #[task( schedule = [main_loop],
+            spawn = [send_midi], 
+            priority=1,
+            resources = [pa4])]
+    fn main_loop(cx:main_loop::Context){
+        static mut LAST_RESULT:bool = false;
         let pin = cx.resources.pa4;
         let result = pin.is_high().unwrap();
-        hprintln!("{}",result).unwrap();
+
+        if result != *LAST_RESULT {
+            *LAST_RESULT = result;
+            let message = if result { NOTE_ON} else {NOTE_OFF};
+            let _ = cx.spawn.send_midi(message);
+            
+        }
+        let _ = cx.schedule.main_loop(cx.scheduled+1_000_000.cycles());
+    }
+
+    /// Sends a midi message over the usb bus
+    /// Note: this runs at a lower priority than the usb bus
+    /// and will eat messages if the bus is not configured yet
+    #[task(priority=2, resources = [usb_dev,midi])]
+    fn send_midi(cx: send_midi::Context, message:UsbMidiEventPacket){
+        let mut midi = cx.resources.midi;
+        let mut usb_dev = cx.resources.usb_dev;
+        usb_dev.lock(|usb_dev|{
+            if usb_dev.state() == UsbDeviceState::Configured{
+                midi.lock(|midi|{
+                    let _ = midi.send_message(message);
+                })
+            }
+        });        
     }
 
     // Process usb events straight away from High priority interrupts
-    #[task(binds = USB_HP_CAN_TX,resources = [usb_dev, midi])]
+    #[task(binds = USB_HP_CAN_TX,resources = [usb_dev, midi], priority=3)]
     fn usb_hp_can_tx(mut cx: usb_hp_can_tx::Context) {
         usb_poll(&mut cx.resources.usb_dev, &mut cx.resources.midi);
     }
 
     // Process usb events straight away from Low priority interrupts
-    #[task(binds= USB_LP_CAN_RX0, resources = [usb_dev, midi])]
+    #[task(binds= USB_LP_CAN_RX0, resources = [usb_dev, midi], priority=3)]
     fn usb_lp_can_rx0(mut cx:usb_lp_can_rx0::Context) {
         usb_poll(&mut cx.resources.usb_dev, &mut cx.resources.midi);
     }
@@ -181,9 +192,10 @@ const APP: () = {
     // Required for software tasks
     extern "C" {
 
-        // Uses the DMA1_CHANNEL1 interrupts for software
+        // Uses the DMA1_CHANNELX interrupts for software
         // task scheduling.
         fn DMA1_CHANNEL1();
+        fn DMA1_CHANNEL2();
     }
 };
 

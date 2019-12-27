@@ -18,6 +18,16 @@ While there is existing products and even firmwares that achieve this, this
 project aims to use embedded rust to explore how useful rust is in an
 embedded context
 
+# What works
+
+Currently will send a midi message when the state of PA4 (bluepill)
+changes. Will send a MIDI ON message on the rising edge, and a MIDI OFF message
+on the falling edge.
+
+This is done by polling that input pin, at the lowest priority.
+It would be better in future versions to trigger this from the EXTI4 interrupt,
+but I'm currently unsure how.
+
 # Contributions
 
 This is my first endevaour in rust and embedded rust, feedback is welcome.
