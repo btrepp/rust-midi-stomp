@@ -1,17 +1,23 @@
 #![no_std]
 #![no_main]
 
+
 // pick a panicking behavior
-extern crate panic_halt; // you can put a breakpoint on `rust_begin_unwind` to catch panics
+extern crate panic_semihosting; // you can put a breakpoint on `rust_begin_unwind` to catch panics
 // extern crate panic_abort; // requires nightly
 // extern crate panic_itm; // logs messages over ITM; requires ITM support
 // extern crate panic_semihosting; // logs messages to the host stderr; requires a debugger
 
 use cortex_m::asm::delay;
-use embedded_hal::digital::v2::OutputPin;
+use cortex_m_semihosting::{hprintln};
+use embedded_hal::digital::v2::{
+    OutputPin,
+    InputPin
+};
 use stm32f1xx_hal::{
     prelude::*,
     usb::{Peripheral, UsbBus, UsbBusType},
+    gpio:: {gpioa::PA4, Input,PullDown}
 };
 use rtfm::cyccnt::U32Ext;
 use usb_device::prelude::UsbDevice;
@@ -71,7 +77,8 @@ const APP: () = {
 
     struct Resources {
         midi: MidiClass<'static,UsbBusType>,
-        usb_dev: UsbDevice<'static,UsbBusType>
+        usb_dev: UsbDevice<'static,UsbBusType>,
+        pa4 : PA4<Input<PullDown>>
     }
 
     #[init(spawn= [send_midi])]
@@ -104,6 +111,7 @@ const APP: () = {
 
         let usb_dm = gpioa.pa11;
         let usb_dp = usb_dp.into_floating_input(&mut gpioa.crh);
+        let pa4 = gpioa.pa4.into_pull_down_input(&mut gpioa.crl);
 
         let usb = Peripheral {
             usb: device.USB,
@@ -125,14 +133,16 @@ const APP: () = {
 
         cx.spawn.send_midi().unwrap();                
 
+        hprintln!("Setup").unwrap();
         init::LateResources {
             usb_dev : usb_dev,
-            midi : midi
+            midi : midi,
+            pa4: pa4
         }
     }
 
 
-    #[task(schedule = [send_midi], priority=1, resources = [usb_dev,midi])]
+    #[task(schedule = [send_midi], priority=1, resources = [usb_dev,midi,pa4])]
     fn send_midi(cx: send_midi::Context){
 
         static mut ON:bool = false;
@@ -151,6 +161,9 @@ const APP: () = {
             
         }
         cx.schedule.send_midi(cx.scheduled+32_000_000.cycles()).unwrap();
+        let pin = cx.resources.pa4;
+        let result = pin.is_high().unwrap();
+        hprintln!("{}",result).unwrap();
     }
 
     // Process usb events straight away from High priority interrupts

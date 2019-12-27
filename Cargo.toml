@@ -11,6 +11,7 @@ cortex-m-rt = "0.6.11"
 cortex-m-rtfm = { version= "0.5.1"}
 cortex-m-semihosting = "0.3.3"
 panic-halt = "0.2.0"
+panic-semihosting = "*"
 usb-device = {version = "0.2.3"}  
 stm32f1xx-hal = {version="0.5.2", features = ["rt","stm32f103","stm32-usbd"]}   
 stm32-usbd = { version = "0.5.0", features = ["ram_access_1x16"] }
