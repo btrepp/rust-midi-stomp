@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+mod constants;
 
 // pick a panicking behavior
 extern crate panic_semihosting; // you can put a breakpoint on `rust_begin_unwind` to catch panics
@@ -26,38 +27,8 @@ use usb_device::prelude::UsbDeviceBuilder;
 use usb_device::prelude::UsbVidPid;
 use usbd_midi::midi_device::MidiClass;
 use usbd_midi::data::usb::constants::USB_CLASS_NONE;
-
-use usbd_midi:: {
-    data:: {
-        byte::u7::U7,
-        midi::notes::Note,
-        midi::message::Message,
-        midi::channel::Channel,
-        usb_midi::cable_number::CableNumber,
-        usb_midi::usb_midi_event_packet::UsbMidiEventPacket
-    }
-};
-
-const CABLE :CableNumber = CableNumber::Cable0;
-const CHANNEL :Channel= Channel::Channel1;
-const NOTE: Note = Note::C3;
-const VELOCITY: U7 = U7::MAX;
-
-const NOTE_ON : UsbMidiEventPacket = {
-    const MIDI :Message= Message::NoteOn(CHANNEL,NOTE,VELOCITY);
-    UsbMidiEventPacket{
-        cable_number : CABLE,
-        message : MIDI
-    }
-};
-
-const NOTE_OFF : UsbMidiEventPacket = {
-    const MIDI :Message= Message::NoteOff(CHANNEL,NOTE,VELOCITY);
-    UsbMidiEventPacket{
-        cable_number : CABLE,
-        message : MIDI
-    }
-};
+use crate::constants::{NOTE_OFF,NOTE_ON};
+use usbd_midi::data::usb_midi::usb_midi_event_packet::UsbMidiEventPacket;
 
 /// Called to process any usb events
 /// Note: this needs to be called often,
