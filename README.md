@@ -16,7 +16,24 @@ Hopefully this should be compatible with other devices that support the HAL.
 
 While there is existing products and even firmwares that achieve this, this
 project aims to use embedded rust to explore how useful rust is in an
-embedded context
+embedded context.
+
+# Priorities
+
+This currently uses RTFM's priorities to schedule 'tasks' as follows.
+1. Processing usb
+2. Sending Midi
+3. Polling IO
+
+Processing usb needs to be done at the highest priority, otherwise the device
+can 'malfunction' in the usb stack. This is also interrupt driven,
+so we are handling the USB side fast.
+
+Then the sending of MIDI messages into the usb stack is prioritized.
+
+The actually IO is currently ran with the lowest priority, as if things
+are missed here it is not the end of the world.
+
 
 # What works
 
