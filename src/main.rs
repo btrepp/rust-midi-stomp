@@ -8,7 +8,6 @@ extern crate panic_halt; // you can put a breakpoint on `rust_begin_unwind` to c
 // extern crate panic_semihosting; // logs messages to the host stderr; requires a debugger
 
 use cortex_m::asm::delay;
-use cortex_m_semihosting::{hprintln};
 use embedded_hal::digital::v2::OutputPin;
 use stm32f1xx_hal::{
     prelude::*,
@@ -55,6 +54,18 @@ const NOTE_OFF : UsbMidiEventPacket = {
     }
 };
 
+/// Called to process any usb events
+/// Note: this needs to be called often,
+/// and seemingly always the same way
+fn usb_poll<B: bus::UsbBus>(
+    usb_dev: &mut UsbDevice<'static, B>,
+    midi: &mut MidiClass<'static, B>,
+) {
+    if !usb_dev.poll(&mut [midi]) {
+        return;
+    }   
+}
+
 #[rtfm::app(device = stm32f1xx_hal::stm32,peripherals = true,monotonic = rtfm::cyccnt::CYCCNT)]
 const APP: () = {
 
@@ -64,10 +75,11 @@ const APP: () = {
     }
 
     #[init(spawn= [send_midi])]
-    fn init(cx: init::Context) -> init::LateResources {
+    fn init(mut cx: init::Context) -> init::LateResources {
         static mut USB_BUS: Option<bus::UsbBusAllocator<UsbBusType>> = None;
 
-        let _core : rtfm::Peripherals = cx.core;
+        cx.core.DCB.enable_trace();
+        cx.core.DWT.enable_cycle_counter();
         let device = cx.device;
 
         let mut flash = device.FLASH.constrain();
@@ -141,29 +153,24 @@ const APP: () = {
         cx.schedule.send_midi(cx.scheduled+32_000_000.cycles()).unwrap();
     }
 
+    // Process usb events straight away from High priority interrupts
     #[task(binds = USB_HP_CAN_TX,resources = [usb_dev, midi])]
     fn usb_hp_can_tx(mut cx: usb_hp_can_tx::Context) {
         usb_poll(&mut cx.resources.usb_dev, &mut cx.resources.midi);
-        hprintln!("TX").unwrap();
     }
 
+    // Process usb events straight away from Low priority interrupts
     #[task(binds= USB_LP_CAN_RX0, resources = [usb_dev, midi])]
     fn usb_lp_can_rx0(mut cx:usb_lp_can_rx0::Context) {
         usb_poll(&mut cx.resources.usb_dev, &mut cx.resources.midi);
     }
 
+    // Required for software tasks
     extern "C" {
+
+        // Uses the DMA1_CHANNEL1 interrupts for software
+        // task scheduling.
         fn DMA1_CHANNEL1();
     }
 };
 
-fn usb_poll<B: bus::UsbBus>(
-    usb_dev: &mut UsbDevice<'static, B>,
-    midi: &mut MidiClass<'static, B>,
-) {
-    if !usb_dev.poll(&mut [midi]) {
-        return;
-    }
-   
-   
-}
