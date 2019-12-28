@@ -17,7 +17,7 @@ use embedded_hal::digital::v2::{
 use stm32f1xx_hal::{
     prelude::*,
     usb::{Peripheral, UsbBus, UsbBusType},
-    gpio:: {gpioa::PA4, Input,PullDown}
+    gpio:: {gpioa::PA4, Input,PullDown,Floating}
 };
 use rtfm::cyccnt::U32Ext;
 use usb_device::prelude::UsbDevice;
@@ -42,6 +42,36 @@ fn usb_poll<B: bus::UsbBus>(
     }   
 }
 
+/// Initializes the bluepill usb stack.
+/// This will also set the dp line low. To RESET
+/// the usb bus
+fn initialize_usb(
+                clocks:&stm32f1xx_hal::rcc::Clocks,
+                pa12:stm32f1xx_hal::gpio::gpioa::PA12<Input<Floating>>,
+                pa11:stm32f1xx_hal::gpio::gpioa::PA11<Input<Floating>>,
+                crh: &mut stm32f1xx_hal::gpio::gpioa::CRH,
+                usb:stm32f1xx_hal::stm32::USB) 
+                -> stm32f1xx_hal::usb::Peripheral {
+                            
+    // BluePill board has a pull-up resistor on the D+ line.
+    // Pull the D+ pin down to send a RESET condition to the USB bus.
+    let mut usb_dp = pa12.into_push_pull_output(crh);
+    usb_dp.set_low().unwrap();
+    delay(clocks.sysclk().0 / 100);
+
+    let usb_dm = pa11;
+    let usb_dp = usb_dp.into_floating_input(crh);
+
+    let usb = Peripheral {
+        usb: usb,
+        pin_dm: usb_dm,
+        pin_dp: usb_dp
+    };
+
+    usb
+}
+
+
 #[rtfm::app(device = stm32f1xx_hal::stm32,peripherals = true,monotonic = rtfm::cyccnt::CYCCNT)]
 const APP: () = {
 
@@ -55,40 +85,30 @@ const APP: () = {
     fn init(mut cx: init::Context) -> init::LateResources {
         static mut USB_BUS: Option<bus::UsbBusAllocator<UsbBusType>> = None;
 
+        // Enables timers so scheduling works
         cx.core.DCB.enable_trace();
         cx.core.DWT.enable_cycle_counter();
-        let device = cx.device;
 
-        let mut flash = device.FLASH.constrain();
-        let mut rcc = device.RCC.constrain();
-        
+        // Take ownership of IO devices
+        let mut rcc = cx.device.RCC.constrain();
+        let mut flash = cx.device.FLASH.constrain();
+        let mut gpioa = cx.device.GPIOA.split(&mut rcc.apb2);
+        let pa12 = gpioa.pa12;
+        let pa11 = gpioa.pa11;
+        let pa4 = gpioa.pa4.into_pull_down_input(&mut gpioa.crl);
+        let usb = cx.device.USB;
+
+        // Configure clocks
         let clocks = rcc
             .cfgr
             .use_hse(8.mhz())
             .sysclk(48.mhz())
             .pclk1(24.mhz())
-            .freeze(&mut flash.acr);
-
-        let mut gpioa = device.GPIOA.split(&mut rcc.apb2);
+            .freeze(&mut flash.acr);       
 
         assert!(clocks.usbclk_valid());
 
-        // BluePill board has a pull-up resistor on the D+ line.
-        // Pull the D+ pin down to send a RESET condition to the USB bus.
-        let mut usb_dp = gpioa.pa12.into_push_pull_output(&mut gpioa.crh);
-        usb_dp.set_low().unwrap();
-        delay(clocks.sysclk().0 / 100);
-
-        let usb_dm = gpioa.pa11;
-        let usb_dp = usb_dp.into_floating_input(&mut gpioa.crh);
-        let pa4 = gpioa.pa4.into_pull_down_input(&mut gpioa.crl);
-
-        let usb = Peripheral {
-            usb: device.USB,
-            pin_dm: usb_dm,
-            pin_dp: usb_dp
-        };
-
+        let usb = initialize_usb(&clocks,pa12,pa11,&mut gpioa.crh,usb);
         *USB_BUS = Some(UsbBus::new(usb));
 
         let midi = MidiClass::new(USB_BUS.as_ref().unwrap());
@@ -101,8 +121,11 @@ const APP: () = {
                 .device_class(USB_CLASS_NONE)
                 .build();
 
-
+        // Start main reading of IO
+        // Will be uncessary if we can use interrupts instead
         cx.spawn.main_loop().unwrap();            
+
+        // Rersources for RTFM
         init::LateResources {
             usb_dev : usb_dev,
             midi : midi,
@@ -123,12 +146,20 @@ const APP: () = {
         let pin = cx.resources.pa4;
         let result = pin.is_high().unwrap();
 
+        // Only send midi if value changes
         if result != *LAST_RESULT {
-            *LAST_RESULT = result;
+
             let message = if result { NOTE_ON} else {NOTE_OFF};
-            let _ = cx.spawn.send_midi(message);
-            
+            // if sucessfully sent, update last result
+            // if not we will try again next time
+            let queued = cx.spawn.send_midi(message);
+            match queued {
+                Ok(_) => {*LAST_RESULT = result;},
+                _ => ()
+            }
         }
+        // Run this function again in future.
+        // Result type is ignored because if it's already scheduled thats okay
         let _ = cx.schedule.main_loop(cx.scheduled+1_000_000.cycles());
     }
 
@@ -139,6 +170,10 @@ const APP: () = {
     fn send_midi(cx: send_midi::Context, message:UsbMidiEventPacket){
         let mut midi = cx.resources.midi;
         let mut usb_dev = cx.resources.usb_dev;
+
+        // Lock this so USB interrupts don't take over
+        // Ideally we may be able to better determine this, so that
+        // it doesn't need to be locked
         usb_dev.lock(|usb_dev|{
             if usb_dev.state() == UsbDeviceState::Configured{
                 midi.lock(|midi|{
