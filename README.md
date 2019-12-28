@@ -23,7 +23,7 @@ embedded context.
 This currently uses RTFM's priorities to schedule 'tasks' as follows.
 1. Processing usb
 2. Sending Midi
-3. Polling IO
+3. Reading IO/Status LEd
 
 Processing usb needs to be done at the highest priority, otherwise the device
 can 'malfunction' in the usb stack. This is also interrupt driven,
@@ -41,9 +41,9 @@ Currently will send a midi message when the state of PA4 (bluepill)
 changes. Will send a MIDI ON message on the rising edge, and a MIDI OFF message
 on the falling edge.
 
-This is done by polling that input pin, at the lowest priority.
-It would be better in future versions to trigger this from the EXTI4 interrupt,
-but I'm currently unsure how.
+The whole system is almost entirely interrupt driven, only the LED blinking is
+not, but this may be possible using PWM instead, and changing the LED based on
+panics/other tasks.
 
 # Contributions
 
