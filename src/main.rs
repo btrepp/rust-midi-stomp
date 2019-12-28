@@ -99,7 +99,10 @@ const APP: () = {
 
     #[init(spawn= [main_loop])]
     fn init(mut cx: init::Context) -> init::LateResources {
+        // This is a bit hacky, but gets us the static lifetime for the 
+        // allocator. Even when based on hardware initialization..
         static mut USB_BUS: Option<bus::UsbBusAllocator<UsbBusType>> = None;
+        
         // Enables timers so scheduling works
         cx.core.DCB.enable_trace();
         cx.core.DWT.enable_cycle_counter();
