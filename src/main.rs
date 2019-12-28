@@ -71,6 +71,20 @@ fn initialize_usb(
     usb
 }
 
+/// Configures the usb device as seen by the operating system.
+fn configure_usb<'a>(usb_bus: &'a bus::UsbBusAllocator<UsbBusType>) 
+                                        -> UsbDevice<'a,UsbBusType> {
+    let usb_vid_pid = UsbVidPid(0x16c0, 0x27dd);
+    let usb_dev =
+        UsbDeviceBuilder::new(usb_bus,usb_vid_pid )
+            .manufacturer("btrepp")
+            .product("Rust Midi Stomp")
+            .serial_number("1")
+            .device_class(USB_CLASS_NONE)
+            .build();   
+    usb_dev
+}
+
 
 #[rtfm::app(device = stm32f1xx_hal::stm32,
             peripherals = true,
@@ -86,7 +100,6 @@ const APP: () = {
     #[init(spawn= [main_loop])]
     fn init(mut cx: init::Context) -> init::LateResources {
         static mut USB_BUS: Option<bus::UsbBusAllocator<UsbBusType>> = None;
-
         // Enables timers so scheduling works
         cx.core.DCB.enable_trace();
         cx.core.DWT.enable_cycle_counter();
@@ -110,24 +123,19 @@ const APP: () = {
 
         assert!(clocks.usbclk_valid());
 
+        // Initialize usb resources
+        // This is a bit tricky due to lifetimes in RTFM/USB playing
+        // difficultly
         let usb = initialize_usb(&clocks,pa12,pa11,&mut gpioa.crh,usb);
         *USB_BUS = Some(UsbBus::new(usb));
-
         let midi = MidiClass::new(USB_BUS.as_ref().unwrap());
-        
-        let usb_dev =
-            UsbDeviceBuilder::new(USB_BUS.as_ref().unwrap(), UsbVidPid(0x16c0, 0x27dd))
-                .manufacturer("Unknown")
-                .product("BluepillX Midi")
-                .serial_number("TOTALLY_LEGIT")
-                .device_class(USB_CLASS_NONE)
-                .build();
+        let usb_dev = configure_usb(USB_BUS.as_ref().unwrap());
 
         // Start main reading of IO
         // Will be uncessary if we can use interrupts instead
         cx.spawn.main_loop().unwrap();            
 
-        // Rersources for RTFM
+        // Resources for RTFM
         init::LateResources {
             usb_dev : usb_dev,
             midi : midi,
