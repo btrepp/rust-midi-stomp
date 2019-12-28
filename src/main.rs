@@ -17,18 +17,25 @@ use embedded_hal::digital::v2::{
 use stm32f1xx_hal::{
     prelude::*,
     usb::{Peripheral, UsbBus, UsbBusType},
-    gpio:: {gpioa::PA4,gpioc::PC13, PushPull, Output, Input,PullDown,Floating, ExtiPin, Edge}
+    gpio::{gpioa::PA4,gpioc::PC13},
+    gpio:: {PushPull, Output, Input,PullDown,Floating, ExtiPin, Edge}
 };
 use rtfm::cyccnt::U32Ext;
-use usb_device::prelude::UsbDevice;
-use usb_device::bus;
-use usb_device::prelude::UsbDeviceState;
-use usb_device::prelude::UsbDeviceBuilder;
-use usb_device::prelude::UsbVidPid;
-use usbd_midi::midi_device::MidiClass;
-use usbd_midi::data::usb::constants::USB_CLASS_NONE;
+use usb_device::{
+    prelude::{
+        UsbDevice,
+        UsbDeviceState,
+        UsbDeviceBuilder,
+        UsbVidPid
+    },
+    bus
+};
+use usbd_midi::{
+    midi_device::MidiClass,
+    data::usb::constants::USB_CLASS_NONE,
+    data::usb_midi::usb_midi_event_packet::UsbMidiEventPacket
+};
 use crate::constants::{NOTE_OFF,NOTE_ON};
-use usbd_midi::data::usb_midi::usb_midi_event_packet::UsbMidiEventPacket;
 
 /// Called to process any usb events
 /// Note: this needs to be called often,
@@ -131,10 +138,11 @@ const APP: () = {
         assert!(clocks.usbclk_valid());
 
         // Configure digital interrupts
+        // This will cause the EXTI4 interrupt to fire 
+        // in the RTFM tasks
         pa4.make_interrupt_source(&mut afio);
         pa4.trigger_on_edge(&cx.device.EXTI, Edge::RISING_FALLING);
         pa4.enable_interrupt(&cx.device.EXTI);
-
 
         // Initialize usb resources
         // This is a bit tricky due to lifetimes in RTFM/USB playing
@@ -144,8 +152,7 @@ const APP: () = {
         let midi = MidiClass::new(USB_BUS.as_ref().unwrap());
         let usb_dev = configure_usb(USB_BUS.as_ref().unwrap());
 
-        // Start main reading of IO
-        // Will be uncessary if we can use interrupts instead
+        // Start the monitoring loop
         cx.spawn.main_loop().unwrap();            
 
         // Resources for RTFM
@@ -158,6 +165,8 @@ const APP: () = {
     }
 
 
+    /// This reads the pins on change and sends a midi signal on.
+    /// Does simplistic de-duping at the moment
     #[task(binds = EXTI4, spawn = [send_midi], resources = [pa4], priority = 1)]
     fn read_inputs(cx:read_inputs::Context) {
         static mut LAST_RESULT:bool = false;
@@ -180,9 +189,8 @@ const APP: () = {
     }
 
     /// Main 'loop'
-    /// currently this runs every 1_000_000 cycles,
-    /// reads the input pin, and converts sends messages
-    /// on an 'edge'
+    /// Currently used to toggle the bluepill led to show the device is
+    /// functioning correctly
     #[task( schedule = [main_loop],
             priority=1,
             resources = [led])]
@@ -226,11 +234,8 @@ const APP: () = {
         usb_poll(&mut cx.resources.usb_dev, &mut cx.resources.midi);
     }
 
-
-
     // Required for software tasks
     extern "C" {
-
         // Uses the DMA1_CHANNELX interrupts for software
         // task scheduling.
         fn DMA1_CHANNEL1();
