@@ -72,7 +72,9 @@ fn initialize_usb(
 }
 
 
-#[rtfm::app(device = stm32f1xx_hal::stm32,peripherals = true,monotonic = rtfm::cyccnt::CYCCNT)]
+#[rtfm::app(device = stm32f1xx_hal::stm32,
+            peripherals = true,
+            monotonic = rtfm::cyccnt::CYCCNT)]
 const APP: () = {
 
     struct Resources {
