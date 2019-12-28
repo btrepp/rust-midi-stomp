@@ -17,7 +17,7 @@ use embedded_hal::digital::v2::{
 use stm32f1xx_hal::{
     prelude::*,
     usb::{Peripheral, UsbBus, UsbBusType},
-    gpio:: {gpioa::PA4, Input,PullDown,Floating}
+    gpio:: {gpioa::PA4, Input,PullDown,Floating, ExtiPin, Edge}
 };
 use rtfm::cyccnt::U32Ext;
 use usb_device::prelude::UsbDevice;
@@ -94,7 +94,7 @@ const APP: () = {
     struct Resources {
         midi: MidiClass<'static,UsbBusType>,
         usb_dev: UsbDevice<'static,UsbBusType>,
-        pa4 : PA4<Input<PullDown>>
+        pa4 : PA4<Input<PullDown>>,
     }
 
     #[init(spawn= [main_loop])]
@@ -102,7 +102,7 @@ const APP: () = {
         // This is a bit hacky, but gets us the static lifetime for the 
         // allocator. Even when based on hardware initialization..
         static mut USB_BUS: Option<bus::UsbBusAllocator<UsbBusType>> = None;
-        
+
         // Enables timers so scheduling works
         cx.core.DCB.enable_trace();
         cx.core.DWT.enable_cycle_counter();
@@ -111,9 +111,10 @@ const APP: () = {
         let mut rcc = cx.device.RCC.constrain();
         let mut flash = cx.device.FLASH.constrain();
         let mut gpioa = cx.device.GPIOA.split(&mut rcc.apb2);
+        let mut afio = cx.device.AFIO.constrain(&mut rcc.apb2);
         let pa12 = gpioa.pa12;
         let pa11 = gpioa.pa11;
-        let pa4 = gpioa.pa4.into_pull_down_input(&mut gpioa.crl);
+        let mut pa4 = gpioa.pa4.into_pull_down_input(&mut gpioa.crl);
         let usb = cx.device.USB;
 
         // Configure clocks
@@ -126,6 +127,12 @@ const APP: () = {
 
         assert!(clocks.usbclk_valid());
 
+        // Configure digital interrupts
+        pa4.make_interrupt_source(&mut afio);
+        pa4.trigger_on_edge(&cx.device.EXTI, Edge::RISING_FALLING);
+        pa4.enable_interrupt(&cx.device.EXTI);
+
+
         // Initialize usb resources
         // This is a bit tricky due to lifetimes in RTFM/USB playing
         // difficultly
@@ -136,7 +143,7 @@ const APP: () = {
 
         // Start main reading of IO
         // Will be uncessary if we can use interrupts instead
-        cx.spawn.main_loop().unwrap();            
+        //cx.spawn.main_loop().unwrap();            
 
         // Resources for RTFM
         init::LateResources {
@@ -144,6 +151,14 @@ const APP: () = {
             midi : midi,
             pa4: pa4
         }
+    }
+
+
+    #[task(binds = EXTI4, spawn = [send_midi], resources = [pa4], priority = 1)]
+    fn read_inputs(cx:read_inputs::Context) {
+        let message = NOTE_ON;
+        let _ = cx.spawn.send_midi(message);
+        cx.resources.pa4.clear_interrupt_pending_bit();
     }
 
     /// Main 'loop'
@@ -207,6 +222,8 @@ const APP: () = {
     fn usb_lp_can_rx0(mut cx:usb_lp_can_rx0::Context) {
         usb_poll(&mut cx.resources.usb_dev, &mut cx.resources.midi);
     }
+
+
 
     // Required for software tasks
     extern "C" {
