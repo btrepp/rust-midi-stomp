@@ -17,7 +17,7 @@ use embedded_hal::digital::v2::{
 use stm32f1xx_hal::{
     prelude::*,
     usb::{Peripheral, UsbBus, UsbBusType},
-    gpio:: {gpioa::PA4, Input,PullDown,Floating, ExtiPin, Edge}
+    gpio:: {gpioa::PA4,gpioc::PC13, PushPull, Output, Input,PullDown,Floating, ExtiPin, Edge}
 };
 use rtfm::cyccnt::U32Ext;
 use usb_device::prelude::UsbDevice;
@@ -95,6 +95,7 @@ const APP: () = {
         midi: MidiClass<'static,UsbBusType>,
         usb_dev: UsbDevice<'static,UsbBusType>,
         pa4 : PA4<Input<PullDown>>,
+        led : PC13<Output<PushPull>>
     }
 
     #[init(spawn= [main_loop])]
@@ -111,10 +112,12 @@ const APP: () = {
         let mut rcc = cx.device.RCC.constrain();
         let mut flash = cx.device.FLASH.constrain();
         let mut gpioa = cx.device.GPIOA.split(&mut rcc.apb2);
+        let mut gpioc = cx.device.GPIOC.split(&mut rcc.apb2);
         let mut afio = cx.device.AFIO.constrain(&mut rcc.apb2);
         let pa12 = gpioa.pa12;
         let pa11 = gpioa.pa11;
         let mut pa4 = gpioa.pa4.into_pull_down_input(&mut gpioa.crl);
+        let led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
         let usb = cx.device.USB;
 
         // Configure clocks
@@ -143,33 +146,20 @@ const APP: () = {
 
         // Start main reading of IO
         // Will be uncessary if we can use interrupts instead
-        //cx.spawn.main_loop().unwrap();            
+        cx.spawn.main_loop().unwrap();            
 
         // Resources for RTFM
         init::LateResources {
             usb_dev : usb_dev,
             midi : midi,
-            pa4: pa4
+            pa4: pa4,
+            led: led
         }
     }
 
 
     #[task(binds = EXTI4, spawn = [send_midi], resources = [pa4], priority = 1)]
     fn read_inputs(cx:read_inputs::Context) {
-        let message = NOTE_ON;
-        let _ = cx.spawn.send_midi(message);
-        cx.resources.pa4.clear_interrupt_pending_bit();
-    }
-
-    /// Main 'loop'
-    /// currently this runs every 1_000_000 cycles,
-    /// reads the input pin, and converts sends messages
-    /// on an 'edge'
-    #[task( schedule = [main_loop],
-            spawn = [send_midi], 
-            priority=1,
-            resources = [pa4])]
-    fn main_loop(cx:main_loop::Context){
         static mut LAST_RESULT:bool = false;
         let pin = cx.resources.pa4;
         let result = pin.is_high().unwrap();
@@ -186,9 +176,22 @@ const APP: () = {
                 _ => ()
             }
         }
+        pin.clear_interrupt_pending_bit();
+    }
+
+    /// Main 'loop'
+    /// currently this runs every 1_000_000 cycles,
+    /// reads the input pin, and converts sends messages
+    /// on an 'edge'
+    #[task( schedule = [main_loop],
+            priority=1,
+            resources = [led])]
+    fn main_loop(cx:main_loop::Context){
+        let _ = cx.resources.led.toggle();
+
         // Run this function again in future.
         // Result type is ignored because if it's already scheduled thats okay
-        let _ = cx.schedule.main_loop(cx.scheduled+1_000_000.cycles());
+        let _ = cx.schedule.main_loop(cx.scheduled+32_000_000.cycles());
     }
 
     /// Sends a midi message over the usb bus
