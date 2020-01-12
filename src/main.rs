@@ -17,8 +17,11 @@ use embedded_hal::digital::v2::{
 use stm32f1xx_hal::{
     prelude::*,
     usb::{Peripheral, UsbBus, UsbBusType},
-    gpio::{gpioa::PA4,gpioc::PC13},
-    gpio:: {PushPull, Output, Input,PullDown,Floating, ExtiPin, Edge}
+    gpio::{
+        gpiob::{PB11,PB12,PB13,PB14,PB15},
+        gpioc::PC13
+    },
+    gpio:: {PushPull, Output, Input,PullUp,Floating, ExtiPin, Edge}
 };
 use rtfm::cyccnt::U32Ext;
 use usb_device::{
@@ -98,10 +101,16 @@ fn configure_usb<'a>(usb_bus: &'a bus::UsbBusAllocator<UsbBusType>)
             monotonic = rtfm::cyccnt::CYCCNT)]
 const APP: () = {
 
+
+
     struct Resources {
         midi: MidiClass<'static,UsbBusType>,
         usb_dev: UsbDevice<'static,UsbBusType>,
-        pa4 : PA4<Input<PullDown>>,
+        pb11 : PB11<Input<PullUp>>,
+        pb12 : PB12<Input<PullUp>>,
+        pb13 : PB13<Input<PullUp>>,
+        pb14 : PB14<Input<PullUp>>,
+        pb15 : PB15<Input<PullUp>>,
         led : PC13<Output<PushPull>>
     }
 
@@ -119,11 +128,16 @@ const APP: () = {
         let mut rcc = cx.device.RCC.constrain();
         let mut flash = cx.device.FLASH.constrain();
         let mut gpioa = cx.device.GPIOA.split(&mut rcc.apb2);
+        let mut gpiob = cx.device.GPIOB.split(&mut rcc.apb2);
         let mut gpioc = cx.device.GPIOC.split(&mut rcc.apb2);
         let mut afio = cx.device.AFIO.constrain(&mut rcc.apb2);
         let pa12 = gpioa.pa12;
         let pa11 = gpioa.pa11;
-        let mut pa4 = gpioa.pa4.into_pull_down_input(&mut gpioa.crl);
+        let mut pb11 = gpiob.pb11.into_pull_up_input(&mut gpiob.crh);
+        let mut pb12 = gpiob.pb12.into_pull_up_input(&mut gpiob.crh);
+        let mut pb13 = gpiob.pb13.into_pull_up_input(&mut gpiob.crh);
+        let mut pb14 = gpiob.pb14.into_pull_up_input(&mut gpiob.crh);
+        let mut pb15 = gpiob.pb15.into_pull_up_input(&mut gpiob.crh);
         let led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
         let usb = cx.device.USB;
 
@@ -138,11 +152,27 @@ const APP: () = {
         assert!(clocks.usbclk_valid());
 
         // Configure digital interrupts
-        // This will cause the EXTI4 interrupt to fire 
+        // This will cause the EXTI15_10 interrupt to fire 
         // in the RTFM tasks
-        pa4.make_interrupt_source(&mut afio);
-        pa4.trigger_on_edge(&cx.device.EXTI, Edge::RISING_FALLING);
-        pa4.enable_interrupt(&cx.device.EXTI);
+        pb11.make_interrupt_source(&mut afio);
+        pb11.trigger_on_edge(&cx.device.EXTI, Edge::RISING_FALLING);
+        pb11.enable_interrupt(&cx.device.EXTI);
+
+        pb12.make_interrupt_source(&mut afio);
+        pb12.trigger_on_edge(&cx.device.EXTI, Edge::RISING_FALLING);
+        pb12.enable_interrupt(&cx.device.EXTI);
+
+        pb13.make_interrupt_source(&mut afio);
+        pb13.trigger_on_edge(&cx.device.EXTI, Edge::RISING_FALLING);
+        pb13.enable_interrupt(&cx.device.EXTI);
+
+        pb14.make_interrupt_source(&mut afio);
+        pb14.trigger_on_edge(&cx.device.EXTI, Edge::RISING_FALLING);
+        pb14.enable_interrupt(&cx.device.EXTI);
+
+        pb15.make_interrupt_source(&mut afio);
+        pb15.trigger_on_edge(&cx.device.EXTI, Edge::RISING_FALLING);
+        pb15.enable_interrupt(&cx.device.EXTI);
 
         // Initialize usb resources
         // This is a bit tricky due to lifetimes in RTFM/USB playing
@@ -159,7 +189,11 @@ const APP: () = {
         init::LateResources {
             usb_dev : usb_dev,
             midi : midi,
-            pa4: pa4,
+            pb11: pb11,
+            pb12: pb12,
+            pb13: pb13,
+            pb14: pb14,
+            pb15: pb15,
             led: led
         }
     }
@@ -167,10 +201,13 @@ const APP: () = {
 
     /// This reads the pins on change and sends a midi signal on.
     /// Does simplistic de-duping at the moment
-    #[task(binds = EXTI4, spawn = [send_midi], resources = [pa4], priority = 1)]
+    #[task(binds = EXTI15_10, 
+            spawn = [send_midi],
+            resources = [pb11,pb12,pb13,pb14,pb15], 
+            priority = 1)]
     fn read_inputs(cx:read_inputs::Context) {
         static mut LAST_RESULT:bool = false;
-        let pin = cx.resources.pa4;
+        let pin = cx.resources.pb11;
         let result = pin.is_high().unwrap();
 
         // Only send midi if value changes
