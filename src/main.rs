@@ -1,13 +1,14 @@
 #![no_std]
 #![no_main]
 
-mod constants;
+mod state;
 
 // pick a panicking behavior
 extern crate panic_semihosting; // you can put a breakpoint on `rust_begin_unwind` to catch panics
 // extern crate panic_abort; // requires nightly
 // extern crate panic_itm; // logs messages over ITM; requires ITM support
 // extern crate panic_semihosting; // logs messages to the host stderr; requires a debugger
+
 
 use cortex_m::asm::delay;
 use embedded_hal::digital::v2::{
@@ -21,7 +22,9 @@ use stm32f1xx_hal::{
         gpiob::{PB11,PB12,PB13,PB14,PB15},
         gpioc::PC13
     },
-    gpio:: {PushPull, Output, Input,PullUp,Floating, ExtiPin, Edge}
+    gpio:: {PushPull, Output, Input,PullUp,Floating},
+    timer::{Timer,CountDownTimer,Event},
+    pac::{TIM1}
 };
 use rtfm::cyccnt::U32Ext;
 use usb_device::{
@@ -38,7 +41,7 @@ use usbd_midi::{
     data::usb::constants::USB_CLASS_NONE,
     data::usb_midi::usb_midi_event_packet::UsbMidiEventPacket
 };
-use crate::constants::{NOTE_OFF,NOTE_ON};
+use crate::state::{ApplicationState,Button,State,Message,Effect};
 
 /// Called to process any usb events
 /// Note: this needs to be called often,
@@ -95,23 +98,26 @@ fn configure_usb<'a>(usb_bus: &'a bus::UsbBusAllocator<UsbBusType>)
     usb_dev
 }
 
+pub struct Inputs {
+    pb11 : PB11<Input<PullUp>>,
+    pb12 : PB12<Input<PullUp>>,
+    pb13 : PB13<Input<PullUp>>,
+    pb14 : PB14<Input<PullUp>>,
+    pb15 : PB15<Input<PullUp>>
+}
 
 #[rtfm::app(device = stm32f1xx_hal::stm32,
             peripherals = true,
             monotonic = rtfm::cyccnt::CYCCNT)]
 const APP: () = {
 
-
-
     struct Resources {
         midi: MidiClass<'static,UsbBusType>,
         usb_dev: UsbDevice<'static,UsbBusType>,
-        pb11 : PB11<Input<PullUp>>,
-        pb12 : PB12<Input<PullUp>>,
-        pb13 : PB13<Input<PullUp>>,
-        pb14 : PB14<Input<PullUp>>,
-        pb15 : PB15<Input<PullUp>>,
-        led : PC13<Output<PushPull>>
+        inputs: Inputs,
+        led : PC13<Output<PushPull>>,
+        timer: CountDownTimer<TIM1>,
+        state : ApplicationState
     }
 
     #[init(spawn= [main_loop])]
@@ -130,14 +136,13 @@ const APP: () = {
         let mut gpioa = cx.device.GPIOA.split(&mut rcc.apb2);
         let mut gpiob = cx.device.GPIOB.split(&mut rcc.apb2);
         let mut gpioc = cx.device.GPIOC.split(&mut rcc.apb2);
-        let mut afio = cx.device.AFIO.constrain(&mut rcc.apb2);
         let pa12 = gpioa.pa12;
         let pa11 = gpioa.pa11;
-        let mut pb11 = gpiob.pb11.into_pull_up_input(&mut gpiob.crh);
-        let mut pb12 = gpiob.pb12.into_pull_up_input(&mut gpiob.crh);
-        let mut pb13 = gpiob.pb13.into_pull_up_input(&mut gpiob.crh);
-        let mut pb14 = gpiob.pb14.into_pull_up_input(&mut gpiob.crh);
-        let mut pb15 = gpiob.pb15.into_pull_up_input(&mut gpiob.crh);
+        let pb11 = gpiob.pb11.into_pull_up_input(&mut gpiob.crh);
+        let pb12 = gpiob.pb12.into_pull_up_input(&mut gpiob.crh);
+        let pb13 = gpiob.pb13.into_pull_up_input(&mut gpiob.crh);
+        let pb14 = gpiob.pb14.into_pull_up_input(&mut gpiob.crh);
+        let pb15 = gpiob.pb15.into_pull_up_input(&mut gpiob.crh);
         let led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
         let usb = cx.device.USB;
 
@@ -151,28 +156,10 @@ const APP: () = {
 
         assert!(clocks.usbclk_valid());
 
-        // Configure digital interrupts
-        // This will cause the EXTI15_10 interrupt to fire 
-        // in the RTFM tasks
-        pb11.make_interrupt_source(&mut afio);
-        pb11.trigger_on_edge(&cx.device.EXTI, Edge::RISING_FALLING);
-        pb11.enable_interrupt(&cx.device.EXTI);
-
-        pb12.make_interrupt_source(&mut afio);
-        pb12.trigger_on_edge(&cx.device.EXTI, Edge::RISING_FALLING);
-        pb12.enable_interrupt(&cx.device.EXTI);
-
-        pb13.make_interrupt_source(&mut afio);
-        pb13.trigger_on_edge(&cx.device.EXTI, Edge::RISING_FALLING);
-        pb13.enable_interrupt(&cx.device.EXTI);
-
-        pb14.make_interrupt_source(&mut afio);
-        pb14.trigger_on_edge(&cx.device.EXTI, Edge::RISING_FALLING);
-        pb14.enable_interrupt(&cx.device.EXTI);
-
-        pb15.make_interrupt_source(&mut afio);
-        pb15.trigger_on_edge(&cx.device.EXTI, Edge::RISING_FALLING);
-        pb15.enable_interrupt(&cx.device.EXTI);
+        //Timer that will be used to read IO
+        let mut timer = Timer::tim1(cx.device.TIM1, &clocks, &mut rcc.apb2)
+            .start_count_down(100.hz());
+        timer.listen(Event::Update);
 
         // Initialize usb resources
         // This is a bit tricky due to lifetimes in RTFM/USB playing
@@ -185,44 +172,82 @@ const APP: () = {
         // Start the monitoring loop
         cx.spawn.main_loop().unwrap();            
 
+        let inputs = 
+            Inputs {
+                pb11: pb11,
+                pb12: pb12,
+                pb13: pb13,
+                pb14: pb14,
+                pb15: pb15,
+            };
         // Resources for RTFM
         init::LateResources {
             usb_dev : usb_dev,
             midi : midi,
-            pb11: pb11,
-            pb12: pb12,
-            pb13: pb13,
-            pb14: pb14,
-            pb15: pb15,
-            led: led
+            inputs: inputs,
+            led: led,
+            state : ApplicationState::init(),
+            timer: timer
         }
     }
 
-
-    /// This reads the pins on change and sends a midi signal on.
-    /// Does simplistic de-duping at the moment
-    #[task(binds = EXTI15_10, 
-            spawn = [send_midi],
-            resources = [pb11,pb12,pb13,pb14,pb15], 
+    /// Will be called periodically.
+    #[task(binds = TIM1_UP, 
+            spawn = [update],
+            resources = [inputs,timer], 
             priority = 1)]
     fn read_inputs(cx:read_inputs::Context) {
-        static mut LAST_RESULT:bool = false;
-        let pin = cx.resources.pb11;
-        let result = pin.is_high().unwrap();
+        // There must be a better way to bank over
+        // these below checks
 
-        // Only send midi if value changes
-        if result != *LAST_RESULT {
+        let inputs = cx.resources.inputs;
 
-            let message = if result { NOTE_ON} else {NOTE_OFF};
-            // if sucessfully sent, update last result
-            // if not we will try again next time
-            let queued = cx.spawn.send_midi(message);
-            match queued {
-                Ok(_) => {*LAST_RESULT = result;},
-                _ => ()
-            }
+        let pb11 = match inputs.pb11.is_high(){
+                        Ok(true) => (Button::One,State::On),
+                        _ => (Button::One,State::Off)
+                    };
+        let pb12 = match inputs.pb12.is_high(){
+            Ok(true) => (Button::Two,State::On),
+            _ => (Button::Two,State::Off)
+        };
+        let pb13 = match inputs.pb13.is_high(){
+            Ok(true) => (Button::Three,State::On),
+            _ => (Button::Three,State::Off)
+        };
+        let pb14 = match inputs.pb14.is_high(){
+            Ok(true) => (Button::Four,State::On),
+            _ => (Button::Four,State::Off)
+        };
+
+        let pb15 = match inputs.pb15.is_high(){
+            Ok(true) => (Button::Five,State::On),
+            _ => (Button::Five,State::Off)
+        };
+
+        let _ = cx.spawn.update(pb11);
+        let _ = cx.spawn.update(pb12);
+        let _ = cx.spawn.update(pb13);
+        let _ = cx.spawn.update(pb14);
+        let _ = cx.spawn.update(pb15);
+
+        cx.resources.timer.clear_update_interrupt_flag();
+    }
+
+    #[task( spawn = [send_midi],
+            resources = [state],
+            priority = 1,
+            capacity = 5)]
+    fn update(cx:update::Context, message:Message) {
+        let (state,effect) = 
+                    ApplicationState::update(*cx.resources.state,message);
+
+        match effect {
+            Effect::Midi(note) => {
+                let _ = cx.spawn.send_midi(note);
+            },
+            Effect::Nothing => ()
         }
-        pin.clear_interrupt_pending_bit();
+        *cx.resources.state = state;
     }
 
     /// Main 'loop'
