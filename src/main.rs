@@ -18,7 +18,6 @@ use stm32f1xx_hal::{
     timer::{Timer,CountDownTimer,Event},
     pac::{TIM1}
 };
-use rtfm::cyccnt::U32Ext;
 use usb_device::{
     prelude::{
         UsbDevice,
@@ -35,8 +34,7 @@ use crate::usb::{configure_usb,usb_poll};
 use crate::stm32f1xx::{Inputs,initialize_usb};
 
 #[rtfm::app(device = stm32f1xx_hal::stm32,
-            peripherals = true,
-            monotonic = rtfm::cyccnt::CYCCNT)]
+            peripherals = true)]
 const APP: () = {
 
     struct Resources {
@@ -48,15 +46,11 @@ const APP: () = {
         state : ApplicationState
     }
 
-    #[init(spawn= [main_loop])]
-    fn init(mut cx: init::Context) -> init::LateResources {
+    #[init()]
+    fn init(cx: init::Context) -> init::LateResources {
         // This is a bit hacky, but gets us the static lifetime for the 
         // allocator. Even when based on hardware initialization..
         static mut USB_BUS: Option<bus::UsbBusAllocator<UsbBusType>> = None;
-
-        // Enables timers so scheduling works
-        cx.core.DCB.enable_trace();
-        cx.core.DWT.enable_cycle_counter();
 
         // Take ownership of IO devices
         let mut rcc = cx.device.RCC.constrain();
@@ -95,10 +89,7 @@ const APP: () = {
         let usb = initialize_usb(&clocks,pa12,pa11,&mut gpioa.crh,usb);
         *USB_BUS = Some(UsbBus::new(usb));
         let midi = MidiClass::new(USB_BUS.as_ref().unwrap());
-        let usb_dev = configure_usb(USB_BUS.as_ref().unwrap());
-
-        // Start the monitoring loop
-        cx.spawn.main_loop().unwrap();            
+        let usb_dev = configure_usb(USB_BUS.as_ref().unwrap());         
 
         let inputs = 
             Inputs {
@@ -154,20 +145,6 @@ const APP: () = {
             Effect::Nothing => ()
         }
         *cx.resources.state = state;
-    }
-
-    /// Main 'loop'
-    /// Currently used to toggle the bluepill led to show the device is
-    /// functioning correctly
-    #[task( schedule = [main_loop],
-            priority=1,
-            resources = [led])]
-    fn main_loop(cx:main_loop::Context){
-        let _ = cx.resources.led.toggle();
-
-        // Run this function again in future.
-        // Result type is ignored because if it's already scheduled thats okay
-        let _ = cx.schedule.main_loop(cx.scheduled+32_000_000.cycles());
     }
 
     /// Sends a midi message over the usb bus
