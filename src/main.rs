@@ -5,7 +5,6 @@ mod state;
 mod usb;
 mod stm32f1xx;
 
-
 extern crate panic_semihosting; 
 
 use crate::stm32f1xx::read_input_pins;

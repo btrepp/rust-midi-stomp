@@ -5,14 +5,11 @@ use usb_device::prelude::UsbDeviceBuilder;
 use usbd_midi::midi_device::MidiClass;
 use usbd_midi::data::usb::constants::USB_CLASS_NONE;
 use usb_device::device::UsbDevice;
-use stm32f1xx_hal::usb::UsbBusType;//TODO, can this use a trait?
-
-
-
 
 /// Configures the usb device as seen by the operating system.
-pub fn configure_usb<'a>(usb_bus: &'a UsbBusAllocator<UsbBusType>) 
-                                        -> UsbDevice<'a,UsbBusType> {
+pub fn configure_usb<'a,B: UsbBus>
+                        (usb_bus: &'a UsbBusAllocator<B>) 
+                                        -> UsbDevice<'a,B> {
     let usb_vid_pid = UsbVidPid(0x16c0, 0x27dd);
     let usb_dev =
         UsbDeviceBuilder::new(usb_bus,usb_vid_pid )
