@@ -19,6 +19,16 @@ pub enum Button {
 #[derive(Clone,Copy,PartialEq)]
 pub enum State { On ,Off }
 
+
+impl From<bool> for State {
+    fn from(value:bool) -> State {
+        match value {
+            true => State::On,
+            false => State::Off
+        }
+    }
+}
+
 /// A button message, this is the event of the button
 /// and it's current state
 pub type Message =(Button, State);

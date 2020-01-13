@@ -2,27 +2,20 @@
 #![no_main]
 
 mod state;
-
-// pick a panicking behavior
-extern crate panic_semihosting; // you can put a breakpoint on `rust_begin_unwind` to catch panics
-// extern crate panic_abort; // requires nightly
-// extern crate panic_itm; // logs messages over ITM; requires ITM support
-// extern crate panic_semihosting; // logs messages to the host stderr; requires a debugger
+mod usb;
+mod stm32f1xx;
 
 
-use cortex_m::asm::delay;
-use embedded_hal::digital::v2::{
-    OutputPin,
-    InputPin
-};
+extern crate panic_semihosting; 
+
+use crate::stm32f1xx::read_input_pins;
 use stm32f1xx_hal::{
     prelude::*,
-    usb::{Peripheral, UsbBus, UsbBusType},
+    usb::{UsbBus, UsbBusType},
     gpio::{
-        gpiob::{PB11,PB12,PB13,PB14,PB15},
         gpioc::PC13
     },
-    gpio:: {PushPull, Output, Input,PullUp,Floating},
+    gpio:: {PushPull, Output},
     timer::{Timer,CountDownTimer,Event},
     pac::{TIM1}
 };
@@ -30,81 +23,17 @@ use rtfm::cyccnt::U32Ext;
 use usb_device::{
     prelude::{
         UsbDevice,
-        UsbDeviceState,
-        UsbDeviceBuilder,
-        UsbVidPid
+        UsbDeviceState
     },
     bus
 };
 use usbd_midi::{
     midi_device::MidiClass,
-    data::usb::constants::USB_CLASS_NONE,
     data::usb_midi::usb_midi_event_packet::UsbMidiEventPacket
 };
-use crate::state::{ApplicationState,Button,State,Message,Effect};
-
-/// Called to process any usb events
-/// Note: this needs to be called often,
-/// and seemingly always the same way
-fn usb_poll<B: bus::UsbBus>(
-    usb_dev: &mut UsbDevice<'static, B>,
-    midi: &mut MidiClass<'static, B>,
-) {
-    if !usb_dev.poll(&mut [midi]) {
-        return;
-    }   
-}
-
-/// Initializes the bluepill usb stack.
-/// This will also set the dp line low. To RESET
-/// the usb bus
-fn initialize_usb(
-                clocks:&stm32f1xx_hal::rcc::Clocks,
-                pa12:stm32f1xx_hal::gpio::gpioa::PA12<Input<Floating>>,
-                pa11:stm32f1xx_hal::gpio::gpioa::PA11<Input<Floating>>,
-                crh: &mut stm32f1xx_hal::gpio::gpioa::CRH,
-                usb:stm32f1xx_hal::stm32::USB) 
-                -> stm32f1xx_hal::usb::Peripheral {
-                            
-    // BluePill board has a pull-up resistor on the D+ line.
-    // Pull the D+ pin down to send a RESET condition to the USB bus.
-    let mut usb_dp = pa12.into_push_pull_output(crh);
-    usb_dp.set_low().unwrap();
-    delay(clocks.sysclk().0 / 100);
-
-    let usb_dm = pa11;
-    let usb_dp = usb_dp.into_floating_input(crh);
-
-    let usb = Peripheral {
-        usb: usb,
-        pin_dm: usb_dm,
-        pin_dp: usb_dp
-    };
-
-    usb
-}
-
-/// Configures the usb device as seen by the operating system.
-fn configure_usb<'a>(usb_bus: &'a bus::UsbBusAllocator<UsbBusType>) 
-                                        -> UsbDevice<'a,UsbBusType> {
-    let usb_vid_pid = UsbVidPid(0x16c0, 0x27dd);
-    let usb_dev =
-        UsbDeviceBuilder::new(usb_bus,usb_vid_pid )
-            .manufacturer("btrepp")
-            .product("Rust Midi Stomp")
-            .serial_number("1")
-            .device_class(USB_CLASS_NONE)
-            .build();   
-    usb_dev
-}
-
-pub struct Inputs {
-    pb11 : PB11<Input<PullUp>>,
-    pb12 : PB12<Input<PullUp>>,
-    pb13 : PB13<Input<PullUp>>,
-    pb14 : PB14<Input<PullUp>>,
-    pb15 : PB15<Input<PullUp>>
-}
+use crate::state::{ApplicationState,Button,Message,Effect};
+use crate::usb::{configure_usb,usb_poll};
+use crate::stm32f1xx::{Inputs,initialize_usb};
 
 #[rtfm::app(device = stm32f1xx_hal::stm32,
             peripherals = true,
@@ -200,35 +129,13 @@ const APP: () = {
         // There must be a better way to bank over
         // these below checks
 
-        let inputs = cx.resources.inputs;
+        let values = read_input_pins(cx.resources.inputs);
 
-        let pb11 = match inputs.pb11.is_high(){
-                        Ok(true) => (Button::One,State::On),
-                        _ => (Button::One,State::Off)
-                    };
-        let pb12 = match inputs.pb12.is_high(){
-            Ok(true) => (Button::Two,State::On),
-            _ => (Button::Two,State::Off)
-        };
-        let pb13 = match inputs.pb13.is_high(){
-            Ok(true) => (Button::Three,State::On),
-            _ => (Button::Three,State::Off)
-        };
-        let pb14 = match inputs.pb14.is_high(){
-            Ok(true) => (Button::Four,State::On),
-            _ => (Button::Four,State::Off)
-        };
-
-        let pb15 = match inputs.pb15.is_high(){
-            Ok(true) => (Button::Five,State::On),
-            _ => (Button::Five,State::Off)
-        };
-
-        let _ = cx.spawn.update(pb11);
-        let _ = cx.spawn.update(pb12);
-        let _ = cx.spawn.update(pb13);
-        let _ = cx.spawn.update(pb14);
-        let _ = cx.spawn.update(pb15);
+        let _ = cx.spawn.update((Button::One,values.pin1));
+        let _ = cx.spawn.update((Button::Two,values.pin2));
+        let _ = cx.spawn.update((Button::Three,values.pin3));
+        let _ = cx.spawn.update((Button::Four,values.pin4));
+        let _ = cx.spawn.update((Button::Five,values.pin5));
 
         cx.resources.timer.clear_update_interrupt_flag();
     }
