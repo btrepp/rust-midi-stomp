@@ -87,7 +87,7 @@ fn message_to_midi(
 
 impl ApplicationState {
     pub fn init() -> ApplicationState {
-        ApplicationState {
+        let state = ApplicationState {
             button1: State::Off,
             button2: State::Off,
             button3: State::Off,
@@ -95,34 +95,30 @@ impl ApplicationState {
             button5: State::Off,
             cable: CableNumber::Cable1,
             channel: Channel::Channel1,
-        }
+        };
+        state
     }
 
-    pub fn update(
-        current: ApplicationState,
-        message: Message,
-    ) -> (ApplicationState, Effect) {
+    pub fn update(mut state: ApplicationState, message: Message) -> Effect {
         let (button, direction) = message;
-        let midi = message_to_midi(current.cable, current.channel, message);
-        let mut updated_state = current;
+        let midi = message_to_midi(state.cable, state.channel, message);
 
-        let update = |button:&mut State| -> Effect {
+        let update = |button: &mut State| -> Effect {
             if *button == direction {
                 Effect::Nothing
             } else {
-                *button = direction;         
+                *button = direction;
                 Effect::Midi(midi)
             }
         };
 
-        let effect = 
-            match button {
-                Button::One => update(&mut updated_state.button1),
-                Button::Two => update(&mut updated_state.button2),
-                Button::Three => update(&mut updated_state.button3),
-                Button::Four => update(&mut updated_state.button4),
-                Button::Five => update(&mut updated_state.button5)
-            };
-        (updated_state,effect)
+        let effect = match button {
+            Button::One => update(&mut state.button1),
+            Button::Two => update(&mut state.button2),
+            Button::Three => update(&mut state.button3),
+            Button::Four => update(&mut state.button4),
+            Button::Five => update(&mut state.button5),
+        };
+        effect
     }
 }

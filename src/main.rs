@@ -92,6 +92,7 @@ const APP: () = {
             pb14: pb14,
             pb15: pb15,
         };
+
         // Resources for RTFM
         init::LateResources {
             usb_dev: usb_dev,
@@ -128,8 +129,7 @@ const APP: () = {
             priority = 1,
             capacity = 5)]
     fn update(cx: update::Context, message: Message) {
-        let (state, effect) =
-            ApplicationState::update(*cx.resources.state, message);
+        let effect = ApplicationState::update(*cx.resources.state, message);
 
         match effect {
             Effect::Midi(note) => {
@@ -137,7 +137,6 @@ const APP: () = {
             }
             Effect::Nothing => (),
         }
-        *cx.resources.state = state;
     }
 
     /// Sends a midi message over the usb bus
