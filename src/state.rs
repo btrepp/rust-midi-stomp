@@ -104,55 +104,25 @@ impl ApplicationState {
     ) -> (ApplicationState, Effect) {
         let (button, direction) = message;
         let midi = message_to_midi(current.cable, current.channel, message);
+        let mut updated_state = current;
 
-        // Maybe heapless might help here.
-        // but heapless isn't copy-able
-        match button {
-            Button::One => {
-                if current.button1 == direction {
-                    (current, Effect::Nothing)
-                } else {
-                    let mut updated_state = current;
-                    updated_state.button1 = direction;
-                    (updated_state, Effect::Midi(midi))
-                }
+        let update = |button:&mut State| -> Effect {
+            if *button == direction {
+                Effect::Nothing
+            } else {
+                *button = direction;         
+                Effect::Midi(midi)
             }
-            Button::Two => {
-                if current.button2 == direction {
-                    (current, Effect::Nothing)
-                } else {
-                    let mut updated_state = current;
-                    updated_state.button2 = direction;
-                    (updated_state, Effect::Midi(midi))
-                }
-            }
-            Button::Three => {
-                if current.button3 == direction {
-                    (current, Effect::Nothing)
-                } else {
-                    let mut updated_state = current;
-                    updated_state.button3 = direction;
-                    (updated_state, Effect::Midi(midi))
-                }
-            }
-            Button::Four => {
-                if current.button4 == direction {
-                    (current, Effect::Nothing)
-                } else {
-                    let mut updated_state = current;
-                    updated_state.button4 = direction;
-                    (updated_state, Effect::Midi(midi))
-                }
-            }
-            Button::Five => {
-                if current.button5 == direction {
-                    (current, Effect::Nothing)
-                } else {
-                    let mut updated_state = current;
-                    updated_state.button5 = direction;
-                    (updated_state, Effect::Midi(midi))
-                }
-            }
-        }
+        };
+
+        let effect = 
+            match button {
+                Button::One => update(&mut updated_state.button1),
+                Button::Two => update(&mut updated_state.button2),
+                Button::Three => update(&mut updated_state.button3),
+                Button::Four => update(&mut updated_state.button4),
+                Button::Five => update(&mut updated_state.button5)
+            };
+        (updated_state,effect)
     }
 }
