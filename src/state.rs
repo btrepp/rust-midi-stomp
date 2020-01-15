@@ -35,14 +35,6 @@ impl From<bool> for State {
 /// and it's current state
 pub type Message = (Button, State);
 
-/// The effects that can be omitted.
-/// Single Note for a single event
-/// Transition may cover changing from one note to the other
-pub enum Effect {
-    Midi(UsbMidiEventPacket),
-    Nothing,
-}
-
 #[derive(Copy, Clone)]
 /// The application state
 pub struct ApplicationState {
@@ -85,40 +77,85 @@ fn message_to_midi(
     }
 }
 
+/// Takes a old state and a new state
+/// and calculates the midi events emitted transitioning between the to
+/// Note that this has an upper bound
+/// of 5 events.
+pub fn midi_events<'a>(
+    old_application: &ApplicationState,
+    new_application: &ApplicationState,
+) -> impl Iterator<Item = UsbMidiEventPacket> {
+    let check = |old: State,
+                 new: State,
+                 button: Button|
+     -> Option<UsbMidiEventPacket> {
+        if old == new {
+            None
+        } else {
+            let message = (button, new);
+            let midi: UsbMidiEventPacket = message_to_midi(
+                new_application.cable,
+                new_application.channel,
+                message,
+            );
+            Some(midi)
+        }
+    };
+    let mut result =
+        heapless::Vec::<Option<UsbMidiEventPacket>, heapless::consts::U5>::new(
+        );
+    let _ = result.push(check(
+        old_application.button1,
+        new_application.button1,
+        Button::One,
+    ));
+    let _ = result.push(check(
+        old_application.button2,
+        new_application.button2,
+        Button::Two,
+    ));
+    let _ = result.push(check(
+        old_application.button3,
+        new_application.button3,
+        Button::Three,
+    ));
+    let _ = result.push(check(
+        old_application.button4,
+        new_application.button4,
+        Button::Four,
+    ));
+    let _ = result.push(check(
+        old_application.button5,
+        new_application.button5,
+        Button::Five,
+    ));
+    result.into_iter().filter_map(|x| x)
+}
+
 impl ApplicationState {
-    pub fn init() -> ApplicationState {
-        let state = ApplicationState {
-            button1: State::Off,
-            button2: State::Off,
-            button3: State::Off,
-            button4: State::Off,
-            button5: State::Off,
-            cable: CableNumber::Cable1,
-            channel: Channel::Channel1,
-        };
-        state
-    }
+    pub const INIT: ApplicationState = ApplicationState {
+        button1: State::Off,
+        button2: State::Off,
+        button3: State::Off,
+        button4: State::Off,
+        button5: State::Off,
+        cable: CableNumber::Cable1,
+        channel: Channel::Channel1,
+    };
 
-    pub fn update(mut state: ApplicationState, message: Message) -> Effect {
+    pub fn update(mut self, message: Message) -> () {
         let (button, direction) = message;
-        let midi = message_to_midi(state.cable, state.channel, message);
 
-        let update = |button: &mut State| -> Effect {
-            if *button == direction {
-                Effect::Nothing
-            } else {
-                *button = direction;
-                Effect::Midi(midi)
-            }
+        let update = |button: &mut State| -> () {
+            *button = direction;
         };
 
-        let effect = match button {
-            Button::One => update(&mut state.button1),
-            Button::Two => update(&mut state.button2),
-            Button::Three => update(&mut state.button3),
-            Button::Four => update(&mut state.button4),
-            Button::Five => update(&mut state.button5),
+        match button {
+            Button::One => update(&mut self.button1),
+            Button::Two => update(&mut self.button2),
+            Button::Three => update(&mut self.button3),
+            Button::Four => update(&mut self.button4),
+            Button::Five => update(&mut self.button5),
         };
-        effect
     }
 }

@@ -7,7 +7,8 @@ mod usb;
 
 extern crate panic_semihosting;
 
-use crate::state::{ApplicationState, Button, Effect, Message};
+use crate::state::midi_events;
+use crate::state::{ApplicationState, Button, Message};
 use crate::stm32f1xx::read_input_pins;
 use crate::stm32f1xx::{initialize_usb, Inputs};
 use crate::usb::{configure_usb, usb_poll};
@@ -99,7 +100,7 @@ const APP: () = {
             midi: midi,
             inputs: inputs,
             led: led,
-            state: ApplicationState::init(),
+            state: ApplicationState::INIT,
             timer: timer,
         }
     }
@@ -129,13 +130,16 @@ const APP: () = {
             priority = 1,
             capacity = 5)]
     fn update(cx: update::Context, message: Message) {
-        let effect = ApplicationState::update(*cx.resources.state, message);
+        let old = cx.resources.state.clone();
+        ApplicationState::update(*cx.resources.state, message);
+        let mut effects = midi_events(&old, cx.resources.state);
+        let effect = effects.next();
 
         match effect {
-            Effect::Midi(note) => {
-                let _ = cx.spawn.send_midi(note);
+            Some(midi) => {
+                let _ = cx.spawn.send_midi(midi);
             }
-            Effect::Nothing => (),
+            _ => (),
         }
     }
 
