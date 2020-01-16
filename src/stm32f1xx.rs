@@ -54,10 +54,10 @@ pub fn initialize_usb(
 
 pub fn read_input_pins(inputs: &mut Inputs) -> InputRead {
     InputRead {
-        pin1: inputs.pb11.is_high().unwrap_or(false).into(),
-        pin2: inputs.pb12.is_high().unwrap_or(false).into(),
-        pin3: inputs.pb12.is_high().unwrap_or(false).into(),
-        pin4: inputs.pb12.is_high().unwrap_or(false).into(),
-        pin5: inputs.pb12.is_high().unwrap_or(false).into(),
+        pin1: inputs.pb11.is_low().unwrap_or(false).into(),
+        pin2: inputs.pb12.is_low().unwrap_or(false).into(),
+        pin3: inputs.pb12.is_low().unwrap_or(false).into(),
+        pin4: inputs.pb12.is_low().unwrap_or(false).into(),
+        pin5: inputs.pb12.is_low().unwrap_or(false).into(),
     }
 }
