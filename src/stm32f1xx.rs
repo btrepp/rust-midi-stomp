@@ -1,6 +1,6 @@
 use crate::state::State;
+use crate::switch::Switch;
 use cortex_m::asm::delay;
-use embedded_hal::digital::v2::InputPin;
 use embedded_hal::digital::v2::OutputPin;
 use stm32f1xx_hal::gpio::gpiob::{PB11, PB12, PB13, PB14, PB15};
 use stm32f1xx_hal::gpio::Floating;
@@ -54,10 +54,10 @@ pub fn initialize_usb(
 
 pub fn read_input_pins(inputs: &mut Inputs) -> InputRead {
     InputRead {
-        pin1: inputs.pb11.is_low().unwrap_or(false).into(),
-        pin2: inputs.pb12.is_low().unwrap_or(false).into(),
-        pin3: inputs.pb12.is_low().unwrap_or(false).into(),
-        pin4: inputs.pb12.is_low().unwrap_or(false).into(),
-        pin5: inputs.pb12.is_low().unwrap_or(false).into(),
+        pin1: inputs.pb11.is_closed().unwrap_or(false).into(),
+        pin2: inputs.pb12.is_closed().unwrap_or(false).into(),
+        pin3: inputs.pb12.is_closed().unwrap_or(false).into(),
+        pin4: inputs.pb12.is_closed().unwrap_or(false).into(),
+        pin5: inputs.pb12.is_closed().unwrap_or(false).into(),
     }
 }

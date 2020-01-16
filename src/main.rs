@@ -3,6 +3,7 @@
 
 mod state;
 mod stm32f1xx;
+mod switch;
 mod usb;
 
 extern crate panic_semihosting;
