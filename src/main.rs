@@ -101,7 +101,7 @@ const APP: () = {
             midi: midi,
             inputs: inputs,
             led: led,
-            state: ApplicationState::INIT,
+            state: ApplicationState::init(),
             timer: timer,
         }
     }
@@ -132,7 +132,7 @@ const APP: () = {
             capacity = 5)]
     fn update(cx: update::Context, message: Message) {
         let old = cx.resources.state.clone();
-        ApplicationState::update(*cx.resources.state, message);
+        ApplicationState::update(&mut *cx.resources.state, message);
         let mut effects = midi_events(&old, cx.resources.state);
         let effect = effects.next();
 
