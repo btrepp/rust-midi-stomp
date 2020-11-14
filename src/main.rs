@@ -30,7 +30,7 @@ use usbd_midi::{
     midi_device::MidiClass,
 };
 
-#[rtfm::app(device = stm32f1xx_hal::stm32,
+#[rtic::app(device = stm32f1xx_hal::stm32,
             peripherals = true)]
 const APP: () = {
     struct Resources {
